@@ -1,36 +1,29 @@
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "../types/supabase";
+import { DB_CONFIG, validateDBConfig, getDBConnectionInfo } from "./db-config";
+
+// Validate database configuration
+validateDBConfig();
 
 // Use environment variables for Supabase configuration
-const supabaseUrl =
-  import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
-const supabaseAnonKey =
-  import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY;
+const supabaseUrl = DB_CONFIG.url;
+const supabaseAnonKey = DB_CONFIG.anonKey;
 
-console.log("🔧 Supabase Configuration:", {
-  url: supabaseUrl ? "✅ Set" : "❌ Missing",
-  key: supabaseAnonKey ? "✅ Set" : "❌ Missing",
-  urlValue: supabaseUrl,
-  keyLength: supabaseAnonKey?.length || 0,
-});
+console.log("🔧 Supabase Configuration:", getDBConnectionInfo());
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("❌ Missing Supabase environment variables:", {
-    VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
-    SUPABASE_URL: import.meta.env.SUPABASE_URL,
-    VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY
-      ? "[SET]"
-      : "[MISSING]",
-    SUPABASE_ANON_KEY: import.meta.env.SUPABASE_ANON_KEY
-      ? "[SET]"
-      : "[MISSING]",
+  console.warn("⚠️ Missing Supabase environment variables. The app will run in offline/demo mode.", {
+    VITE_SUPABASE_URL: supabaseUrl ? "✅ Set" : "❌ Missing",
+    VITE_SUPABASE_ANON_KEY: supabaseAnonKey ? "✅ Set" : "❌ Missing",
   });
-  throw new Error(
-    "Missing Supabase environment variables. Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or SUPABASE_URL and SUPABASE_ANON_KEY) are set.",
-  );
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+// Use placeholder values if env vars are missing so the client can be created without crashing.
+// API calls will fail gracefully instead of the entire app crashing on load.
+const fallbackUrl = supabaseUrl || "https://placeholder.supabase.co";
+const fallbackKey = supabaseAnonKey || "placeholder-key";
+
+export const supabase = createClient<Database>(fallbackUrl, fallbackKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
@@ -38,6 +31,8 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     flowType: "pkce",
   },
 });
+
+export const isSupabaseConfigured = DB_CONFIG.isConfigured;
 
 // Auth helpers
 export const signUp = async (
@@ -427,18 +422,38 @@ export const signOut = async () => {
 
 export const getCurrentUser = async () => {
   try {
+    // If Supabase is not configured, return null user without error
+    if (!isSupabaseConfigured) {
+      console.log("ℹ️ Supabase not configured - skipping getCurrentUser");
+      return { user: null, error: null };
+    }
+
+    // First check if there's an active session before calling getUser
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return { user: null, error: null };
+    }
+
     const {
       data: { user },
       error,
     } = await supabase.auth.getUser();
 
     if (error) {
+      // AuthSessionMissingError is normal when not logged in - don't log as error
+      if (error.name === "AuthSessionMissingError" || error.message?.includes("session missing")) {
+        return { user: null, error: null };
+      }
       console.error("Get user error:", error);
       return { user: null, error };
     }
 
     return { user, error: null };
   } catch (err: any) {
+    // AuthSessionMissingError is expected when there's no session
+    if (err.name === "AuthSessionMissingError" || err.message?.includes("session missing")) {
+      return { user: null, error: null };
+    }
     console.error("Get user catch error:", err);
     return {
       user: null,

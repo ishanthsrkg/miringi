@@ -52,7 +52,6 @@ export const useAuth = () => {
         ])) as any;
 
         if (error) {
-          console.error("❌ خطأ في تحميل الجلسة الأولية:", error);
           // Don't set error for initial session check - this is normal when not logged in
           console.log("ℹ️ لا توجد جلسة نشطة - هذا طبيعي عند عدم تسجيل الدخول");
         } else if (user) {
